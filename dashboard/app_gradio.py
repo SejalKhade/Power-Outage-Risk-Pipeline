@@ -192,7 +192,8 @@ def folium_scatter(df):
     """Real interactive map using Folium + OpenStreetMap tiles."""
     try:
         m = folium.Map(location=[39.5,-98.35], zoom_start=4,
-                       tiles="CartoDB dark_matter",
+                       tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+                       attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                        width="100%", height="460px")
         # Build GeoJSON for all utilities
         features = []
@@ -265,7 +266,8 @@ def folium_clusters(df, k=6):
                 for _,r in stats.iterrows()}
 
         m = folium.Map(location=[39.5,-98.35], zoom_start=4,
-                       tiles="CartoDB dark_matter",
+                       tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+                       attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                        width="100%", height="460px")
 
         # One FeatureGroup per cluster for layer control
