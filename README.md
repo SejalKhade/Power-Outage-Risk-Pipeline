@@ -5,7 +5,7 @@ End-to-end ML pipeline identifying high-risk electric utilities across the Unite
 [![CI](https://github.com/SejalKhade/Power-Outage-Risk-Dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/SejalKhade/Power-Outage-Risk-Dashboard/actions/workflows/ci.yml)
 [![Live Dashboard](https://img.shields.io/badge/Live%20Dashboard-HuggingFace-orange)](https://sejjjallll-power-outage-risk-dashboard.hf.space)
 
-**🔗 Live Dashboard →** [sejjjallll-power-outage-risk-dashboard.hf.space](https://sejjjallll-power-outage-risk-dashboard.hf.space)
+**🔗 Live Dashboard →** [sejjjallll-power-outage-risk-dashboard.hf.space](https://huggingface.co/spaces/Sejjjallll/power-outage-risk-dashboard)
 
 ---
 
