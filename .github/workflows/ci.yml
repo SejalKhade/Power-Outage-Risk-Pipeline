@@ -31,6 +31,8 @@ jobs:
           files = [
               'src/preprocess.py',
               'src/medallion.py',
+              'src/flows.py',
+              'src/s3_publish.py',
               'src/features.py',
               'src/train.py',
               'src/utils.py',

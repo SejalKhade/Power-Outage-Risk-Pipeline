@@ -123,6 +123,35 @@ merge across batches); the `negative_value` quarantine rule matched 0 rows on th
 
 ---
 
+## Orchestration (Prefect) and AWS S3 + Athena
+
+`src/flows.py` runs the same pipeline as a Prefect flow: **land Bronze, build Silver, quality gate, build Gold,
+write manifest, publish to S3.** Each layer is its own task, transient steps retry (S3 uploads back off
+10s, 30s, 60s), and the **quality gate fails the run when more than 1% of rows are quarantined**, before Gold
+is built.
+
+```bash
+python -m src.flows --raw data/raw/merged_utility_storm_2024.csv                  # run once
+python -m src.flows --raw ... --s3-bucket my-bucket                                # ...and publish to S3
+python -m src.flows --raw ... --serve "0 6 * * *"                                  # daily at 06:00
+```
+
+`src/s3_publish.py` uploads each layer as `s3://<bucket>/<prefix>/<layer>/<table>/batch_id=<id>/...`
+(server-side encrypted, size verified after upload), re-writes Silver and Gold with snake_case column names
+so Athena can query them, and generates the Athena `CREATE EXTERNAL TABLE` statements (partitioned by `batch_id`).
+
+| Claim | Status |
+|---|---|
+| Flow on the real 3,441,325-row file: quality gate passes (0.003% quarantined), Gold built, identity check PASS | Run and passing |
+| Flow tests: full run, dirty batch stopped before Gold, S3 publish, retry of a failed upload | 8 tests in CI (`tests/test_flows_s3.py`) |
+| S3 layout, encryption, size verification, Athena DDL | Tested against a mocked S3 (moto) |
+| **Real AWS (S3 bucket + Athena row counts match the manifest)** | `python scripts/aws_check.py` writes `docs/aws_run.md` when run against an account. Not yet run. |
+
+```bash
+export AWS_BUCKET=my-bucket        # AWS credentials via the normal chain
+python scripts/aws_check.py --raw data/raw/merged_utility_storm_2024.csv --limit 200000
+```
+
 ## Key Technical Contribution — Data Leakage Detection
 
 Initial models returned ROC-AUC = 1.0 — a clear signal of leakage.
@@ -137,7 +166,7 @@ This is the difference between a model that looks good in development and one th
 
 ## Tech Stack
 
-**ML/Data:** Python · Scikit-learn · XGBoost · LightGBM · MLflow · Pandas · NumPy · DuckDB (SQL)
+**ML/Data:** Python · Scikit-learn · XGBoost · LightGBM · MLflow · Pandas · NumPy · DuckDB (SQL) · Prefect · boto3 (S3) · Athena
 **API:** FastAPI · Pydantic · Uvicorn
 **Dashboard:** Gradio · Folium · Plotly
 **DevOps:** Docker · GitHub Actions (CI/CD) · Hugging Face Spaces
@@ -153,6 +182,7 @@ pip install -r requirements.txt
 
 # Run pipeline stages
 python -m src.medallion --sync-legacy   # Bronze -> Silver -> Gold (see above)
+python -m src.flows --raw data/raw/merged_utility_storm_2024.csv   # same, orchestrated with Prefect
 # ...or the original step-by-step stages:
 python -m src.preprocess     # 3.44M rows -> clean parquet
 python -m src.features       # -> 1,677 utility features
@@ -177,6 +207,8 @@ docker run -p 8000:8000 power-outage-risk
 Power-Outage-Risk-Pipeline/
 ├── src/
 │   ├── medallion.py         Bronze -> Silver -> Gold (DuckDB SQL)
+│   ├── flows.py             Prefect flow: quality gate, retries, S3 publish
+│   ├── s3_publish.py        Upload layers to S3, generate Athena tables
 │   ├── preprocess.py        Stage 1 — data pipeline (original pandas version)
 │   ├── features.py          Stage 2 — feature engineering
 │   ├── train.py             Stage 3 — ML training + MLflow
