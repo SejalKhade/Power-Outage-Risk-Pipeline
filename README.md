@@ -1,11 +1,40 @@
 # ⚡ Power Outage Risk Analysis Pipeline
 
-End-to-end ML pipeline identifying high-risk electric utilities across the United States using EIA-861 reliability data and NOAA Storm Events data.
+Which US electric utilities are most at risk of poor reliability, and does storm exposure help predict it?
+This project joins EIA-861 reliability data with NOAA Storm Events (2024), builds a 1,677-utility risk dataset,
+trains and compares 28 models, and serves the result through a REST API and a live dashboard.
 
-[![CI](https://github.com/SejalKhade/Power-Outage-Risk-Dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/SejalKhade/Power-Outage-Risk-Dashboard/actions/workflows/ci.yml)
+[![CI](https://github.com/SejalKhade/Power-Outage-Risk-Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/SejalKhade/Power-Outage-Risk-Pipeline/actions/workflows/ci.yml)
 [![Live Dashboard](https://img.shields.io/badge/Live%20Dashboard-HuggingFace-orange)](https://sejjjallll-power-outage-risk-dashboard.hf.space)
 
 **🔗 Live Dashboard →** [sejjjallll-power-outage-risk-dashboard.hf.space](https://huggingface.co/spaces/Sejjjallll/power-outage-risk-dashboard)
+
+---
+
+## What this project does
+
+Utilities report how reliable their service is: **SAIDI** (minutes a customer is without power per year) and
+**SAIFI** (how often outages happen). NOAA separately logs severe-weather events. Step by step:
+
+1. **Data.** EIA-861 reliability and service-territory data merged with the 2024 NOAA Storm Events, giving
+   3.44M utility x storm-event rows (`merged_utility_storm_2024.csv`, 1.5 GB, not stored in the repo).
+2. **Clean.** Rows outside the 50 US states are dropped, numeric fields are coerced, exact duplicates removed.
+   This can be run as the original pandas stage (`src/preprocess.py`) or as the Bronze/Silver/Gold pipeline
+   below (`src/medallion.py`), which produces the same result and adds quarantine, lineage and a run manifest.
+3. **Features.** Everything is aggregated to **one row per utility** (1,677 utilities, 46 columns): storm counts,
+   damage and magnitude by event type, grid structure (NERC region, ownership, counties served) and
+   SAIDI/SAIFI percentile ranks.
+4. **Label.** A utility is **High Risk** if it is in the top 20% by the average of its SAIDI and SAIFI percentile
+   ranks (336 of 1,677).
+5. **Model.** 28 tracked experiments (7 classifiers x 2 feature sets x 2 thresholds), selecting the best by PR-AUC.
+   Using only utility attributes, no model beats chance (ROC-AUC 0.50); adding storm features lifts the best
+   model to 0.77. The selected model (Logistic Regression + weather features) scores ROC-AUC 0.667, PR-AUC 0.322.
+6. **Serve.** A FastAPI service (`/predict`, `/health`, `/model-info`) returns a risk label and probability for a
+   utility, and a Gradio + Folium dashboard on Hugging Face Spaces lets you filter by state, ownership and NERC
+   region, view risk on maps, and compare utilities.
+
+Scope: one year of data (2024), a single train/test evaluation per experiment, and a risk label derived from
+SAIDI/SAIFI, so this ranks relative reliability risk; it does not forecast individual outages.
 
 ---
 
@@ -13,15 +42,15 @@ End-to-end ML pipeline identifying high-risk electric utilities across the Unite
 
 | Metric | Value |
 |---|---|
-| Records processed | **3,441,222** raw → 1,677 utility-level |
+| Records processed | **3,441,325** raw rows → 3,441,222 in the 50 states → 2,504,145 after de-duplication → 1,677 utilities |
 | Features engineered | **46** |
-| Utilities classified High Risk | **336 of 1,677 (20%)** across 50 states |
+| Utilities classified High Risk | **336 of 1,677 (20%)**; utilities span all 50 states |
 | MLflow experiments | **28** (7 classifiers × 2 feature sets × 2 thresholds) |
-| Best model | Logistic Regression + Weather features |
-| ROC-AUC | **0.668** (leakage-corrected from 1.0) |
-| PR-AUC | **0.325** |
-| Weather feature uplift | **+54% ROC-AUC** (0.50 → 0.77) |
-| Estimated economic loss | **$74.5B** annually |
+| Best model | Logistic Regression + Weather features (selected by PR-AUC) |
+| ROC-AUC | **0.667** (leakage-corrected from 1.0) |
+| PR-AUC | **0.322** |
+| Weather feature uplift | **+54% ROC-AUC** (0.50 utility-only → 0.77 best weather model) |
+| Estimated economic loss | **$74.5B** annually (a rough model: SAIDI hours x a customer proxy of 50,000 per county x a DOE cost per customer-hour; not a measured loss) |
 
 ---
 
@@ -73,7 +102,7 @@ reason, coercion counts) and enforces `bronze_rows == quarantined + duplicates_r
 | Check | Result |
 |---|---|
 | Bronze rows | 3,441,325 |
-| Quarantined (invalid US state) | 103 |
+| Quarantined (not one of the 50 states) | 103 (84 `DC`, 18 `CN`, 1 blank) |
 | Exact duplicates removed | 937,077 |
 | Silver rows | **2,504,145**, identical row count to the original `preprocess.py` output |
 | Gold utility features | 1,677 rows x 46 columns; **no feature column differs** from the original output (tolerance 1e-9) |
@@ -89,7 +118,7 @@ python -m src.medallion --raw data/raw/merged_utility_storm_2024.csv
 python -m src.medallion --raw ... --sync-legacy   # also copies gold features to data/processed/ for train.py and the dashboard
 ```
 
-Known limits: runs single-machine; Silver is rebuilt in full from one Bronze batch (no incremental
+Known limits: `DC` is quarantined because the original filter lists only the 50 states; runs single-machine; Silver is rebuilt in full from one Bronze batch (no incremental
 merge across batches); the `negative_value` quarantine rule matched 0 rows on this dataset.
 
 ---
@@ -100,7 +129,7 @@ Initial models returned ROC-AUC = 1.0 — a clear signal of leakage.
 
 **Root cause:** Three engineered features (`estimated_annual_loss_usd`, `nerc_sla_breach_risk`, `sla_breach_margin_min`) were derived directly from SAIDI, which defines the target variable. The model was predicting risk from risk.
 
-**Fix:** Removed all SAIDI-derived features from the feature set, retrained across all 28 experiments. ROC-AUC corrected from 1.0 → 0.668.
+**Fix:** Removed all SAIDI-derived features from the feature set, retrained across all 28 experiments. ROC-AUC corrected from 1.0 → 0.667.
 
 This is the difference between a model that looks good in development and one that would actually work in production.
 
@@ -118,8 +147,8 @@ This is the difference between a model that looks good in development and one th
 ## Run Locally
 
 ```bash
-git clone https://github.com/SejalKhade/Power-Outage-Risk-Dashboard.git
-cd Power-Outage-Risk-Dashboard
+git clone https://github.com/SejalKhade/Power-Outage-Risk-Pipeline.git
+cd Power-Outage-Risk-Pipeline
 pip install -r requirements.txt
 
 # Run pipeline stages
@@ -145,7 +174,7 @@ docker run -p 8000:8000 power-outage-risk
 ## Repository Structure
 
 ```
-power-outage-risk-dashboard/
+Power-Outage-Risk-Pipeline/
 ├── src/
 │   ├── medallion.py         Bronze -> Silver -> Gold (DuckDB SQL)
 │   ├── preprocess.py        Stage 1 — data pipeline (original pandas version)
