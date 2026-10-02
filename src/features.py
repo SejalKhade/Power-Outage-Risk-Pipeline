@@ -156,16 +156,20 @@ NERC_SAIDI_THRESHOLD = 150.0
 # MAIN FUNCTION
 # ══════════════════════════════════════════════════════════════════
 
-def build_utility_features() -> pd.DataFrame:
+def build_utility_features(input_path: str = INPUT_PATH,
+                           output_path: str = OUTPUT_PATH) -> pd.DataFrame:
     """
     Runs all feature engineering steps in sequence.
     Returns a DataFrame with 1 row per utility, ready for ML training.
+
+    input_path / output_path default to the original locations, so existing
+    callers are unchanged. The medallion pipeline passes Silver -> Gold paths.
     """
     log_section("STAGE 2 — FEATURE ENGINEERING")
 
     # ── Load clean parquet ─────────────────────────────────────────
-    print(f"  Loading: {INPUT_PATH}")
-    df = pd.read_parquet(INPUT_PATH)
+    print(f"  Loading: {input_path}")
+    df = pd.read_parquet(input_path)
     log_step("LOADED", df)
 
     # ── Step A: Fix numeric types ──────────────────────────────────
@@ -190,9 +194,9 @@ def build_utility_features() -> pd.DataFrame:
     print("  ✓ Step E: ML labels added")
 
     # ── Step F: Save output ────────────────────────────────────────
-    ensure_dir(OUTPUT_DIR)
-    utility_df.to_parquet(OUTPUT_PATH, index=False)
-    print(f"\n  ✓ Saved → {OUTPUT_PATH}")
+    ensure_dir(os.path.dirname(output_path) or ".")
+    utility_df.to_parquet(output_path, index=False)
+    print(f"\n  ✓ Saved → {output_path}")
     log_step("FINAL", utility_df)
 
     return utility_df

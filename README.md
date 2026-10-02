@@ -53,6 +53,47 @@ Dashboard — dashboard/app_gradio.py    Gradio + Folium maps deployed to HF Spa
 
 ---
 
+## Medallion Pipeline (Bronze -> Silver -> Gold)
+
+`python -m src.medallion` lands the raw CSV and builds the analysis tables in three layers.
+Engine: **DuckDB SQL** for Bronze/Silver and the Gold summary; Gold utility features reuse the
+existing `src/features.py`. (Not Spark. 3.4M rows / 1.5 GB runs on one machine in about 90 seconds.)
+
+| Layer | What it holds | Rules |
+|---|---|---|
+| **Bronze** | Raw CSV as-is, every column kept as text, plus `_batch_id`, `_ingested_at`, `_source_file`, `_row_id` | Append-only: a re-run writes a new batch, never overwrites one |
+| **Silver** | Typed, validated, de-duplicated events (same cleaning rules as `src/preprocess.py`, in SQL) | Required columns must exist or the run fails; invalid rows go to a **quarantine** table with a reason code; coercions are counted in the manifest |
+| **Gold** | `utility_features` (1 row per utility, from `src/features.py`) and `state_risk_summary` | Built only from Silver |
+
+Every run writes `data/manifest/run_<batch>.json` (source file hash, counts per layer, rejects by
+reason, coercion counts) and enforces `bronze_rows == quarantined + duplicates_removed + silver_rows`.
+
+**Measured on the real 3.44M-row file**
+
+| Check | Result |
+|---|---|
+| Bronze rows | 3,441,325 |
+| Quarantined (invalid US state) | 103 |
+| Exact duplicates removed | 937,077 |
+| Silver rows | **2,504,145**, identical row count to the original `preprocess.py` output |
+| Gold utility features | 1,677 rows x 46 columns; **no feature column differs** from the original output (tolerance 1e-9) |
+| High-risk utilities | 336 of 1,677 (20%), unchanged |
+| Silver rows differing from the original output | 207 (0.008%), in the 16th significant digit of one damage value, because pandas' default CSV parser rounds `4179999.9999999995` to `4180000.0` and Silver keeps the source value |
+
+Tests (`tests/test_medallion.py`, 13): bronze lineage and append-only behaviour, row-count identity,
+quarantine reasons, type and cleaning rules, fail-fast on a missing column, and parity with the
+original pandas cleaner on a synthetic file.
+
+```bash
+python -m src.medallion --raw data/raw/merged_utility_storm_2024.csv
+python -m src.medallion --raw ... --sync-legacy   # also copies gold features to data/processed/ for train.py and the dashboard
+```
+
+Known limits: runs single-machine; Silver is rebuilt in full from one Bronze batch (no incremental
+merge across batches); the `negative_value` quarantine rule matched 0 rows on this dataset.
+
+---
+
 ## Key Technical Contribution — Data Leakage Detection
 
 Initial models returned ROC-AUC = 1.0 — a clear signal of leakage.
@@ -67,7 +108,7 @@ This is the difference between a model that looks good in development and one th
 
 ## Tech Stack
 
-**ML/Data:** Python · Scikit-learn · XGBoost · LightGBM · MLflow · Pandas · NumPy
+**ML/Data:** Python · Scikit-learn · XGBoost · LightGBM · MLflow · Pandas · NumPy · DuckDB (SQL)
 **API:** FastAPI · Pydantic · Uvicorn
 **Dashboard:** Gradio · Folium · Plotly
 **DevOps:** Docker · GitHub Actions (CI/CD) · Hugging Face Spaces
@@ -82,6 +123,8 @@ cd Power-Outage-Risk-Dashboard
 pip install -r requirements.txt
 
 # Run pipeline stages
+python -m src.medallion --sync-legacy   # Bronze -> Silver -> Gold (see above)
+# ...or the original step-by-step stages:
 python -m src.preprocess     # 3.44M rows -> clean parquet
 python -m src.features       # -> 1,677 utility features
 python -m src.train          # 28 MLflow experiments
@@ -104,10 +147,12 @@ docker run -p 8000:8000 power-outage-risk
 ```
 power-outage-risk-dashboard/
 ├── src/
-│   ├── preprocess.py        Stage 1 — data pipeline
+│   ├── medallion.py         Bronze -> Silver -> Gold (DuckDB SQL)
+│   ├── preprocess.py        Stage 1 — data pipeline (original pandas version)
 │   ├── features.py          Stage 2 — feature engineering
 │   ├── train.py             Stage 3 — ML training + MLflow
 │   └── utils.py             Shared helpers
+├── tests/                   test_utils.py, test_medallion.py
 ├── api/
 │   └── main.py              FastAPI REST endpoint
 ├── dashboard/

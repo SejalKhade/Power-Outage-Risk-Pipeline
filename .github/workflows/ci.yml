@@ -30,6 +30,7 @@ jobs:
           import os
           files = [
               'src/preprocess.py',
+              'src/medallion.py',
               'src/features.py',
               'src/train.py',
               'src/utils.py',
