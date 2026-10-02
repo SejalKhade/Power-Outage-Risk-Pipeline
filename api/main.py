@@ -197,7 +197,7 @@ def model_info():
         "pipeline_steps": list(model.named_steps.keys()),
         "description":   (
             "Logistic Regression trained on Utility + Weather features. "
-            "Leakage-corrected ROC-AUC: 0.668. PR-AUC: 0.325. "
+            "Leakage-corrected ROC-AUC: 0.667. PR-AUC: 0.322. "
             "Identifies top 20% highest-risk utilities across 50 US states."
         ),
     }

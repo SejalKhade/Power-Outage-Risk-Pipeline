@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
-COPY api/api/ ./api/
+COPY api/ ./api/
 COPY outputs/ ./outputs/
 
 ENV PYTHONPATH=/app
