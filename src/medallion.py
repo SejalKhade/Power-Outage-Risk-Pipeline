@@ -239,13 +239,28 @@ def build_gold(con: duckdb.DuckDBPyConnection, silver_path: str, gold_dir: Path)
 # ORCHESTRATION
 # ══════════════════════════════════════════════════════════════════
 
+def new_batch_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:6]
+
+
+def write_manifest(manifest: dict, data_dir: str | Path) -> Path:
+    """Stamp completion, record the identity check, and write data/manifest/run_<batch>.json."""
+    manifest["finished_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    manifest["identity_check"] = "bronze_rows == quarantined + duplicates_removed + silver_rows : PASS"
+    mdir = Path(data_dir) / "manifest"
+    mdir.mkdir(parents=True, exist_ok=True)
+    path = mdir / f"run_{manifest['batch_id']}.json"
+    path.write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    return path
+
+
 def run(raw_csv: str | Path, data_dir: str | Path = "data", batch_id: str | None = None,
         build_gold_layer: bool = True, sync_legacy: bool = False,
         limit: int | None = None) -> dict:
     raw_csv, data_dir = Path(raw_csv), Path(data_dir)
     if not raw_csv.exists():
         raise FileNotFoundError(f"Raw file not found: {raw_csv}")
-    batch_id = batch_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:6]
+    batch_id = batch_id or new_batch_id()
     ingested_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -286,11 +301,7 @@ def run(raw_csv: str | Path, data_dir: str | Path = "data", batch_id: str | None
     finally:
         con.close()
 
-    manifest["finished_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    manifest["identity_check"] = "bronze_rows == quarantined + duplicates_removed + silver_rows : PASS"
-    mdir = data_dir / "manifest"
-    mdir.mkdir(exist_ok=True)
-    (mdir / f"run_{batch_id}.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    write_manifest(manifest, data_dir)
     return manifest
 
 
